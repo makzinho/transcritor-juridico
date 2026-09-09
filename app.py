@@ -2,18 +2,19 @@ import streamlit as st
 import os
 import json
 import time
+import subprocess
 import tempfile
 from pathlib import Path
 
 import requests
-import static_ffmpeg
+import imageio_ffmpeg
 from groq import Groq
-from pydub import AudioSegment
 
-# Garante que os binários do ffmpeg E do ffprobe estejam disponíveis, sem
-# depender de instalação via apt-get do sistema operacional (evita problemas
-# de infraestrutura em hospedagens gratuitas como o Streamlit Cloud).
-static_ffmpeg.add_paths()
+# Caminho do binário do ffmpeg, incluído diretamente no pacote pip
+# "imageio-ffmpeg" (não depende de apt-get nem de downloads em tempo de
+# execução, o que evita os problemas de infraestrutura vistos em hospedagens
+# gratuitas como o Streamlit Cloud).
+CAMINHO_FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO GERAL DA PÁGINA
@@ -66,22 +67,40 @@ def get_chave_assemblyai() -> str:
 def preparar_audio(arquivo_carregado) -> str:
     """
     Recebe o arquivo enviado pelo usuário (vídeo ou áudio), extrai/otimiza o
-    áudio com pydub+ffmpeg e salva como um .mp3 temporário, mono e com taxa
-    de amostragem reduzida — isso diminui o tamanho do arquivo antes de
-    enviar para a API e garante compatibilidade mesmo com vídeos (.mp4, .mov).
+    áudio chamando o ffmpeg diretamente (sem pydub) e salva como um .mp3
+    temporário, mono e com taxa de amostragem reduzida — isso diminui o
+    tamanho do arquivo antes de enviar para a API e garante compatibilidade
+    mesmo com vídeos (.mp4, .mov).
     """
     sufixo_original = Path(arquivo_carregado.name).suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=sufixo_original) as tmp_in:
         tmp_in.write(arquivo_carregado.getbuffer())
         caminho_entrada = tmp_in.name
 
-    audio = AudioSegment.from_file(caminho_entrada)
-    audio = audio.set_channels(1).set_frame_rate(16000)
-
     caminho_saida = caminho_entrada + "_convertido.mp3"
-    audio.export(caminho_saida, format="mp3", bitrate="64k")
+
+    comando = [
+        CAMINHO_FFMPEG,
+        "-y",              # sobrescreve o arquivo de saída se já existir
+        "-i", caminho_entrada,
+        "-vn",             # descarta qualquer trilha de vídeo/imagem
+        "-ac", "1",        # áudio mono
+        "-ar", "16000",    # taxa de amostragem reduzida
+        "-b:a", "64k",     # bitrate baixo (arquivo final bem mais leve)
+        caminho_saida,
+    ]
+    resultado = subprocess.run(
+        comando, capture_output=True, text=True
+    )
 
     os.remove(caminho_entrada)
+
+    if resultado.returncode != 0 or not os.path.exists(caminho_saida):
+        raise RuntimeError(
+            "Falha ao converter o arquivo de áudio/vídeo com o ffmpeg:\n"
+            f"{resultado.stderr[-800:]}"
+        )
+
     return caminho_saida
 
 

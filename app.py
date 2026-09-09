@@ -6,8 +6,14 @@ import tempfile
 from pathlib import Path
 
 import requests
+import imageio_ffmpeg
 from groq import Groq
 from pydub import AudioSegment
+
+# Aponta o pydub para o binário do ffmpeg baixado via pip (imageio-ffmpeg),
+# evitando depender do apt-get do sistema operacional (fonte de instabilidade
+# em algumas hospedagens gratuitas).
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO GERAL DA PÁGINA
